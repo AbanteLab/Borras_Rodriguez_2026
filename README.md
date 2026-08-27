@@ -1,12 +1,12 @@
-# Code for "Accelerated biological aging in major depressive disorder primarily affects the immune system and can be counteracted by reprogramming"
+# Code for *"Accelerated biological aging in major depressive disorder primarily affects the immune system and can be counteracted by reprogramming"*
 
-This repo depends on [`proteomics_tools`](https://github.com/AbanteLab/proteomics_tools)
-for all generic proteomics functions (GLM fitting, delta-method contrasts, GSEA,
-volcano plots, PCA).  Everything study-specific (data paths, contrasts, MOFA
-integration, figure generation) lives here.
+**Borrás-Pernas & Rodríguez-Navarro et al.**
+
+This repository contains the analysis code used to produce the results and figures in the manuscript above: proteomic preprocessing, GLM/GSEA differential analysis, MOFA multi-omic integration, and figure generation.
+
+It depends on [`proteomics_tools`](https://github.com/AbanteLab/proteomics_tools) for all generic proteomics functions (GLM fitting, delta-method contrasts, GSEA, volcano plots, PCA). Everything study-specific — data paths, contrasts, MOFA integration, figure generation — lives here.
 
 > **Status:** Code associated with a manuscript currently under revision.
-
 ---
 
 ## Repository layout
