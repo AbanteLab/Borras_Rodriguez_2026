@@ -43,6 +43,15 @@ SPLEEN_RAW_FILE  = DATA_DIR / "spleen.tsv"
 METADATA_FILE    = DATA_DIR / "metadata.csv"
 
 # ---------------------------------------------------------------------------
+# IMPUTATION
+# ---------------------------------------------------------------------------
+
+# Seed for the MNAR down-shifted-Gaussian imputation draws in
+# preprocess_hp_adrenal.py, so preprocessing is reproducible run-to-run.
+# The original data_treatment_hp_sr.py did not seed this step.
+IMPUTATION_SEED = 42
+
+# ---------------------------------------------------------------------------
 # SAMPLE EXCLUSIONS
 # ---------------------------------------------------------------------------
 

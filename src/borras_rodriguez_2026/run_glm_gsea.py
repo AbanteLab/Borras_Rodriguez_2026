@@ -50,6 +50,7 @@ from .config import (
     GLM_RESULTS_DIR,
     GSEA_RESULTS_DIR,
     PROCESSED_DATA_DIR,
+    SAMPLES_TO_EXCLUDE,
     VOLCANO_COEF_THRESHOLD,
     VOLCANO_FDR_THRESHOLD,
     get_glm_family,
@@ -73,6 +74,13 @@ def _load_processed(tissue: str) -> pd.DataFrame:
     log.info("Loading %s from %s", tissue, path)
     df = pd.read_csv(path, header=0)
     df.columns = df.columns.str.lower()
+
+    # The preprocessed CSV includes every sample (matching the original
+    # data_treatment_hp_sr.py output); specific samples (e.g. 1884) are
+    # excluded here, mirroring stat_analysis.py's original behavior.
+    for sid in SAMPLES_TO_EXCLUDE:
+        df = df[df["sample_id"].astype(str) != str(sid)]
+
     return df
 
 

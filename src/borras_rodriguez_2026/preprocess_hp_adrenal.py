@@ -3,20 +3,26 @@ preprocess_hp_adrenal.py — Load, clean, impute, and save hippocampus and adren
 
 Faithfully follows the original data_analysis_hp_sr.py + data_treatment_hp_sr.py pipeline:
 
-  1. Load raw TSV.
-  2. Filter rows where >50% of quantity values are NaN.
-  3. Log2 normalisation (counts per million).
-  4. Remove rows with NaN gene name or multi-gene entries (containing ';').
-  5. Classify missing values as MNAR, MAR, or ambiguous.
-  6. Impute MNAR with down-shifted Gaussian; MAR/ambiguous with KNN.
-  7. Resolve duplicated genes:
+  1. Compute per-sample nan_count from RAW, pre-imputation intensities
+     (mirrors data_analysis_hp_sr.py / utils.treat_hp_sr_data) and save it.
+     This must happen before imputation — by the time the main pipeline
+     below has run, there are no missing intensities left to count.
+  2. Load raw TSV.
+  3. Filter rows where >50% of quantity values are NaN.
+  4. Log2 normalisation (counts per million).
+  5. Remove rows with NaN gene name or multi-gene entries (containing ';').
+  6. Classify missing values as MNAR, MAR, or ambiguous.
+  7. Impute MNAR with down-shifted Gaussian; MAR/ambiguous with KNN.
+  8. Resolve duplicated genes:
        - Fragment/Isoform → sum intensities.
        - Other duplicates  → keep row with highest PG.Cscore.
-  8. Convert PRE-imputation data to long format and save nan counts per sample.
-  9. Classify missingness, impute, and resolve duplicates.
-  10. Convert imputed data to long format and merge with metadata.
-  11. Save processed long-format CSV.
-  12. PCA diagnostic plots.
+  9. Convert imputed data to long format and merge with metadata.
+  10. Save processed long-format CSV (all samples — sample exclusion, e.g.
+      SAMPLES_TO_EXCLUDE, is applied downstream by consumers, not here,
+      matching the original pipeline where data_treatment_hp_sr.py's saved
+      output is unfiltered and stat_analysis.py/integration.py exclude
+      specific samples later).
+  11. PCA diagnostic plots.
 
 Run directly:
     python -m repro_paper.preprocess_hp_adrenal
@@ -25,6 +31,7 @@ Run directly:
 from __future__ import annotations
 
 import logging
+import re
 
 import numpy as np
 import pandas as pd
@@ -36,9 +43,9 @@ from .config import (
     ADRENAL_RAW_FILE,
     GROUP_CATEGORIES,
     HP_RAW_FILE,
+    IMPUTATION_SEED,
     METADATA_FILE,
     PROCESSED_DATA_DIR,
-    SAMPLES_TO_EXCLUDE,
     SEX_CATEGORIES,
     GROUP_COLORS,
     SEX_COLORS,
@@ -137,11 +144,15 @@ def _impute(
     log.info("Median peptide-wise variance: %.4f", median_variance)
 
     # MNAR: draw from a Gaussian centred at the 0.25% quantile of the column.
+    # Seeded (unlike the original data_treatment_hp_sr.py) so preprocessing
+    # is reproducible across runs; a local Generator avoids mutating global
+    # numpy random state.
+    rng = np.random.default_rng(IMPUTATION_SEED)
     for index, row in df.iterrows():
         for col in quantity_cols:
             if pd.isna(row[col]) and missingness.at[index, col] == "MNAR":
                 col_quantile = df[col].quantile(0.0025)
-                imputed      = np.random.normal(
+                imputed      = rng.normal(
                     loc=col_quantile, scale=median_variance ** 0.5
                 )
                 df_imputed.at[index, col] = imputed
@@ -239,8 +250,6 @@ def _to_long_format(
     tissue: str,
 ) -> pd.DataFrame:
     """Convert wide format to long format and merge with metadata."""
-    import re
-
     records = []
     for col in quantity_cols:
         parts     = col.split("_")
@@ -300,6 +309,64 @@ def _to_long_format(
 
 
 # ---------------------------------------------------------------------------
+# Pre-imputation nan_count (faithfully reproduces data_analysis_hp_sr.py)
+# ---------------------------------------------------------------------------
+
+def _raw_nan_counts(raw_file, metadata: pd.DataFrame, tissue: str) -> pd.DataFrame:
+    """Count genuine missing Intensity values per sample from the RAW data.
+
+    Mirrors data_analysis_hp_sr.py + utils.treat_hp_sr_data: only rows with
+    a null PG.UniProtIds or PG.Genes are dropped — no >50% filter, no log2,
+    no duplicate-gene resolution, no imputation. This is the value later
+    consumed downstream as the GLM's `nan_count` covariate, so it must
+    reflect real pre-imputation missingness rather than the fully-imputed
+    intensity column (which by construction has no NaNs left to count).
+
+    ``metadata`` must already have lowercase columns, matching what
+    ``preprocess_tissue`` builds before calling this.
+    """
+    df = pd.read_csv(raw_file, sep="\t")
+    df = df[~df["PG.UniProtIds"].isnull()]
+    df = df[~df["PG.Genes"].isnull()]
+    df_filt = df[[
+        col for col in df.columns
+        if "Quantity" in col
+        or col in ["PG.Genes", "PG.ProteinNames", "PG.ProteinDescriptions", "PG.UniProtIds"]
+    ]]
+    quantity_cols = [c for c in df_filt.columns if "Quantity" in c]
+
+    records = []
+    for col in quantity_cols:
+        parts     = col.split("_")
+        info      = parts[1].strip()
+        split     = info.split(".")
+        sample_id = re.findall(r"\d+", split[0])
+        if not sample_id:
+            continue
+        records.append(pd.DataFrame({
+            "sample_id": sample_id[0],
+            "Intensity": df_filt[col].values,
+        }))
+    long_df = pd.concat(records, ignore_index=True)
+
+    long_df["sample_id"] = long_df["sample_id"].astype(str).str.zfill(2)
+    metadata              = metadata.copy()
+    metadata[tissue]      = metadata[tissue].astype(int).astype(str).str.zfill(2)
+    metadata["sample_id"] = metadata["sample_id"].astype(str).str.zfill(2)
+
+    merged = long_df.merge(metadata, left_on="sample_id", right_on=tissue, how="left")
+    merged["sample_id"] = merged["sample_id_y"]
+
+    nan_counts = (
+        merged[merged["Intensity"].isna()]
+        .groupby("sample_id")
+        .size()
+        .reset_index(name="nan_count")
+    )
+    return nan_counts
+
+
+# ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
 
@@ -321,15 +388,6 @@ def preprocess_tissue(tissue: str) -> pd.DataFrame:
     out_dir  = PROCESSED_DATA_DIR / tissue
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # ── 1-2. Load and filter ─────────────────────────────────────────────
-    df, quantity_cols = _load_and_filter(raw_file)
-
-    # ── 3. Log2 normalise ────────────────────────────────────────────────
-    df = _log2_normalise(df, quantity_cols)
-
-    # ── 4. Clean gene names ──────────────────────────────────────────────
-    df = _clean_genes(df)
-
     # ── Load metadata (needed for nan counts and final merge) ────────────
     metadata = pd.read_csv(METADATA_FILE)
     metadata = metadata.rename(
@@ -340,7 +398,28 @@ def preprocess_tissue(tissue: str) -> pd.DataFrame:
         metadata["condition"].str.lower() + "_" + metadata["treatment"].str.lower()
     )
 
-    # ── 5. Classify missingness ──────────────────────────────────────────
+    # ── 1. Pre-imputation nan_count ───────────────────────────────────────
+    # Must be computed from the RAW data, before any imputation happens —
+    # this is the GLM's nan_count covariate, and by the time imputation has
+    # run there are no missing intensities left to count.
+    log.info("Computing pre-imputation nan_count …")
+    nan_counts = _raw_nan_counts(raw_file, metadata, tissue)
+    nan_counts.to_csv(out_dir / f"sample_nan_counts_{tissue}.csv", index=False)
+    log.info(
+        "Nan counts saved — total NaNs across samples: %d",
+        int(nan_counts["nan_count"].sum()) if not nan_counts.empty else 0,
+    )
+
+    # ── 2-3. Load and filter ─────────────────────────────────────────────
+    df, quantity_cols = _load_and_filter(raw_file)
+
+    # ── 4. Log2 normalise ────────────────────────────────────────────────
+    df = _log2_normalise(df, quantity_cols)
+
+    # ── 5. Clean gene names ──────────────────────────────────────────────
+    df = _clean_genes(df)
+
+    # ── 6. Classify missingness ──────────────────────────────────────────
     log.info("Classifying missingness …")
     missingness = _classify_missingness(df, quantity_cols)
 
@@ -353,42 +432,25 @@ def preprocess_tissue(tissue: str) -> pd.DataFrame:
         out_dir / f"{tissue}_missingness_summary.csv", index=False
     )
 
-    # ── 6. Impute ────────────────────────────────────────────────────────
+    # ── 7. Impute ────────────────────────────────────────────────────────
     log.info("Imputing missing values …")
     df_imputed = _impute(df, quantity_cols, missingness)
 
-    # ── 7. Resolve duplicate genes ───────────────────────────────────────
+    # ── 8. Resolve duplicate genes ───────────────────────────────────────
     df_processed = _resolve_duplicates(df_imputed, quantity_cols)
 
     # Save wide-format processed file.
     df_processed.to_csv(out_dir / f"log2_{tissue}_processed.csv", index=False)
 
-    # ── 8-9. Long format + metadata merge (imputed data for GLM) ─────────
+    # ── 9. Long format + metadata merge (imputed data for GLM) ───────────
     df_final = _to_long_format(df_processed, quantity_cols, metadata, tissue)
 
-    # ── 10. Save nan counts from the final long-format output ─────────────
-    # The original pipeline computed NaN counts after merging into long format,
-    # by which point imputation has already filled all missing intensities.
-    nan_counts = (
-        df_final[df_final["intensity"].isna()]
-        .groupby("sample_id")
-        .size()
-        .reset_index(name="nan_count")
-    )
-    if nan_counts.empty:
-        nan_counts = pd.DataFrame(columns=["sample_id", "nan_count"])
-    nan_counts.to_csv(
-        out_dir / f"sample_nan_counts_{tissue}.csv", index=False
-    )
-    log.info(
-        "Nan counts saved — total NaNs across samples: %d",
-        int(nan_counts["nan_count"].sum()) if not nan_counts.empty else 0,
-    )
-
-    # ── Exclude bad samples ───────────────────────────────────────────────
-    for sid in SAMPLES_TO_EXCLUDE:
-        df_final = df_final[df_final["sample_id"] != sid]
-        df_final = df_final[df_final["sample_id"] != str(sid)]
+    # Note: sample exclusion (SAMPLES_TO_EXCLUDE, e.g. sample 1884) is NOT
+    # applied here. The original pipeline's data_treatment_hp_sr.py saves
+    # every sample and excludes specific ones later, downstream, in
+    # stat_analysis.py / integration.py — so this saved CSV matches that
+    # and downstream consumers (run_glm_gsea.py, run_mofa.py) apply the
+    # exclusion themselves.
 
     # ── Categoricals for GLM reference level ─────────────────────────────
     df_final["group"] = pd.Categorical(
@@ -403,12 +465,12 @@ def preprocess_tissue(tissue: str) -> pd.DataFrame:
         by=["treatment", "condition"], ascending=[False, True]
     ).reset_index(drop=True)
 
-    # ── 11. Save long-format CSV ──────────────────────────────────────────
+    # ── 10. Save long-format CSV ──────────────────────────────────────────
     out_path = out_dir / f"log2_{tissue}_long_format_processed.csv"
     df_final.to_csv(out_path, index=False)
     log.info("Saved %s  shape=%s", out_path, df_final.shape)
 
-    # ── 12. PCA diagnostic plots ──────────────────────────────────────────
+    # ── 11. PCA diagnostic plots ──────────────────────────────────────────
     for color_by, color_dict in [("sex", SEX_COLORS), ("group", GROUP_COLORS)]:
         try:
             plot_pca(

@@ -149,7 +149,7 @@ def _run_factor_gsea(
 # Main pipeline
 # ---------------------------------------------------------------------------
 
-def run_mofa_pipeline() -> None:
+def run_mofa_pipeline(run_gsea: bool = True) -> None:
     mofa_out = MOFA_DIR
     mofa_out.mkdir(parents=True, exist_ok=True)
     model_path = (
@@ -330,29 +330,32 @@ def run_mofa_pipeline() -> None:
     log.info("Mann-Whitney U results saved  n_tests=%d", len(mwu_df))
 
     # ── 12. GSEA on factor weights per view ───────────────────────────────
-    gsea_mofa_dir = MOFA_DIR / "gsea"
-    log.info("Running GSEA on MOFA factor weights …")
+    if run_gsea:
+        gsea_mofa_dir = MOFA_DIR / "gsea"
+        log.info("Running GSEA on MOFA factor weights …")
 
-    weights_full = m.get_weights(df=True)
+        weights_full = m.get_weights(df=True)
 
-    for view in m.views:
-        view_weights = weights_full[weights_full.index.str.endswith(view)].copy()
-        view_weights.index = view_weights.index.str.replace(view, "", regex=False)
-        background = set(view_weights.index.tolist())
+        for view in m.views:
+            view_weights = weights_full[weights_full.index.str.endswith(view)].copy()
+            view_weights.index = view_weights.index.str.replace(view, "", regex=False)
+            background = set(view_weights.index.tolist())
 
-        for factor in factors:
-            if factor not in view_weights.columns:
-                continue
-            w = view_weights[factor].dropna()
-            if w.empty:
-                continue
-            _run_factor_gsea(
-                weights=w,
-                factor=factor,
-                view=view,
-                out_dir=gsea_mofa_dir / factor / view,
-                background_genes=background,
-            )
+            for factor in factors:
+                if factor not in view_weights.columns:
+                    continue
+                w = view_weights[factor].dropna()
+                if w.empty:
+                    continue
+                _run_factor_gsea(
+                    weights=w,
+                    factor=factor,
+                    view=view,
+                    out_dir=gsea_mofa_dir / factor / view,
+                    background_genes=background,
+                )
+    else:
+        log.info("Skipping MOFA factor GSEA (run_gsea=False).")
 
     log.info("MOFA pipeline complete.")
 if __name__ == "__main__":
