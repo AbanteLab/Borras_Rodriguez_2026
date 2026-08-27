@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "repro_paper"
+version = "0.1.0"
+description = "Reproduction code for the proteomics reprogramming paper (Giralt lab, 2025)."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "proteomics_analysis @ file:///pool01/code/projects/giralt_lab/proteomics_repro_fall_25/proteomics_analysis",
+    "numpy",
+    "pandas",
+    "scipy",
+    "statsmodels",
+    "scikit-learn",
+    "matplotlib",
+    "seaborn",
+    "tqdm",
+    "gseapy",
+    "mofapy2",
+    "mofax",
+    "matplotlib_venn",
+    "plottable",
+    "openpyxl",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
