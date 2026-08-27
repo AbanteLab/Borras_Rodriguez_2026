@@ -96,18 +96,18 @@ borras_rodriguez_2026/
 ## Installation
 
 ```bash
-# 1. Install the generic proteomics_analysis dependency
-pip install -e /path/to/proteomics_analysis
+# 1. Install the generic proteomics_tools dependency
+pip install -e /path/to/proteomics_tools
 
 # 2. Install this repo
-pip install -e /path/to/repro_paper
+pip install -e /path/to/borras_rodriguez_2026
 ```
 
 ---
 
 ## Configuration
 
-Edit **`src/borras_2026/config.py`** before running anything:
+Edit **`src/borras_rodriguez_2026/config.py`** before running anything:
 
 | Variable | What to set |
 |---|---|
@@ -126,31 +126,31 @@ Edit **`src/borras_2026/config.py`** before running anything:
 
 ### Full pipeline (all stages)
 ```bash
-python -m repro_paper.pipeline
+python -m borras_rodriguez_2026.pipeline
 ```
 
 ### Individual stages
 ```bash
 # Stage 1 — preprocessing only
-python -m repro_paper.preprocess_hp_adrenal
-python -m repro_paper.preprocess_spleen
+python -m borras_rodriguez_2026.preprocess_hp_adrenal
+python -m borras_rodriguez_2026.preprocess_spleen
 
 # Stage 2 — GLM + GSEA (all tissues, or one at a time)
-python -m repro_paper.run_glm_gsea
-python -m repro_paper.run_glm_gsea --tissue hipocamp
+python -m borras_rodriguez_2026.run_glm_gsea
+python -m borras_rodriguez_2026.run_glm_gsea --tissue hipocamp
 
 # Stage 3 — MOFA integration
-python -m repro_paper.run_mofa
+python -m borras_rodriguez_2026.run_mofa
 
 # Stage 4 — paper figures
-python -m repro_paper.results_paper_fig_4
-python -m repro_paper.results_paper_fig_5
+python -m borras_rodriguez_2026.results_paper_fig_4
+python -m borras_rodriguez_2026.results_paper_fig_5
 ```
 
 ### Skip stages when re-running
 ```bash
 # Re-generate figures only (skip all computation)
-python -m repro_paper.pipeline --skip-preprocess --skip-glm --skip-mofa
+python -m borras_rodriguez_2026.pipeline --skip-preprocess --skip-glm --skip-mofa
 ```
 
 ---
